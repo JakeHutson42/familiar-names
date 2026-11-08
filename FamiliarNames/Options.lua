@@ -138,6 +138,33 @@ function Names:PickMarker(anchor, onSelect)
     self.markerPicker:Show()
 end
 
+function Names:PickEffect(anchor, onSelect)
+    if not self.effectPicker then
+        local picker = CreateFrame("Frame", "FamiliarNamesEffectPicker", UIParent, "BackdropTemplate")
+        picker:SetSize(200, 216)
+        picker:SetFrameStrata("DIALOG")
+        picker:SetClampedToScreen(true)
+        picker:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 } })
+        table.insert(UISpecialFrames, "FamiliarNamesEffectPicker")
+        for index, preset in ipairs(self.effectPresets) do
+            local effect = preset
+            local button = Button(picker, effect.label, 10, -10 - (index - 1) * 28, 180, function()
+                picker.onSelect(effect.id)
+                picker:Hide()
+            end)
+            if effect.color then button:GetFontString():SetTextColor(unpack(effect.color)) end
+            Tooltip(button, effect.description)
+        end
+        self.effectPicker = picker
+    end
+    self.effectPicker.onSelect = onSelect
+    self.effectPicker:ClearAllPoints()
+    self.effectPicker:SetPoint("TOPRIGHT", anchor, "BOTTOMRIGHT", 0, -4)
+    self.effectPicker:Show()
+end
+
 local function CategoryRow(parent, row, y)
     local function Key() return row == 5 and "enemies" or Names.db.priority[row] end
     local label = Label(parent, "", 12, y - 7)
@@ -198,7 +225,7 @@ function Names:CreateOptions()
     scroll:SetPoint("TOPLEFT", 16, -90)
     scroll:SetPoint("BOTTOMRIGHT", -32, 16)
     local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(620, 1270)
+    content:SetSize(620, 1610)
     scroll:SetScrollChild(content)
     scroll:SetScript("OnSizeChanged", function(self, width) content:SetWidth(math.max(600, width)) end)
 
@@ -233,22 +260,61 @@ function Names:CreateOptions()
     SettingCheckbox(content, "Outline names", "outline", 4, -554)
     SettingCheckbox(content, "Show player titles", "showTitles", 204, -554)
     SettingCheckbox(content, "Show guild names", "showGuild", 404, -554)
-    local preview = Label(content, "", 16, -598)
+    local previewFrame = CreateFrame("Frame", nil, content)
+    previewFrame:SetPoint("TOPLEFT", 16, -582)
+    previewFrame:SetSize(280, 60)
+    previewFrame.name = previewFrame:CreateFontString(nil, "OVERLAY")
+    previewFrame.name:SetPoint("CENTER")
+    local preview = previewFrame.name
+    self.effectPreview = previewFrame
+    Label(content, "Name and effect preview", 330, -600, "GameFontDisableSmall")
     table.insert(refreshers, function()
+        self:StopNameEffect(previewFrame)
+        local category = self.previewCategory or self.db.priority[1]
+        local rule = self.db.categories[category]
         preview:SetFont(STANDARD_TEXT_FONT, self.db.fontSize, self.db.outline and "OUTLINE" or "")
         preview:SetText(self.db.showTitles and "Champion Exampleplayer" or "Exampleplayer")
-        preview:SetTextColor(unpack(self.db.categories[self.db.priority[1]].color))
+        preview:SetTextColor(unpack(rule.color))
+        if panel:IsShown() then self:ApplyNameEffect(previewFrame, rule.effect) end
     end)
 
-    Section(content, "Personal markers", -662)
-    SettingCheckbox(content, "Enable personal markers", "markersEnabled", 4, -698)
-    SettingCheckbox(content, "Show markers when names are hidden", "markersWhenHidden", 300, -698)
-    Slider(content, "Marker size", "markerSize", 14, -762, 12, 48)
-    Slider(content, "Marker vertical offset", "markerOffset", 330, -762, 0, 60)
-    Label(content, "Mark your current target (player or NPC)", 12, -816, "GameFontNormal")
+    Section(content, "Animated highlights", -654)
+    SettingCheckbox(content, "Enable animated highlights", "animatedNames", 4, -690,
+        "Turn off to use your static name colours. Effects only animate visible addon labels; they do not reveal hidden names or nameplates.")
+    Slider(content, "Effect intensity", "effectIntensity", 14, -752, 0, 100)
+    Slider(content, "Effect speed (%)", "effectSpeed", 330, -752, 25, 200)
+    for index = 1, 5 do
+        local row = index
+        local x, y = 12 + ((index - 1) % 2) * 300, -810 - math.floor((index - 1) / 2) * 38
+        local function Category() return row == 5 and "enemies" or self.db.priority[row] end
+        local label = Label(content, "", x, y - 5, "GameFontHighlightSmall")
+        local button = Button(content, "", x + 145, y, 135, function(anchor)
+            local category = Category()
+            self:PickEffect(anchor, function(id)
+                self.db.categories[category].effect = id
+                self.previewCategory = category
+                self:SettingsChanged()
+            end)
+        end)
+        table.insert(refreshers, function()
+            local category = Category()
+            label:SetText(self.categoryLabels[category])
+            local effect = self:GetEffectPreset(self.db.categories[category].effect)
+            button:SetText(effect.label)
+            button:GetFontString():SetTextColor(unpack(effect.color or self.db.categories[category].color))
+        end)
+    end
+    Label(content, "Effects tint names. None restores your chosen colour. Enemy effects need enemy highlighting.", 12, -938, "GameFontDisableSmall")
+
+    Section(content, "Personal markers", -1002)
+    SettingCheckbox(content, "Enable personal markers", "markersEnabled", 4, -1038)
+    SettingCheckbox(content, "Show markers when names are hidden", "markersWhenHidden", 300, -1038)
+    Slider(content, "Marker size", "markerSize", 14, -1102, 12, 48)
+    Slider(content, "Marker vertical offset", "markerOffset", 330, -1102, 0, 60)
+    Label(content, "Mark your current target (player or NPC)", 12, -1156, "GameFontNormal")
     for index = 1, 8 do
         local selected = index
-        local button = Button(content, "", 12 + (index - 1) * 44, -842, 36, function() self:MarkTarget(selected) end)
+        local button = Button(content, "", 12 + (index - 1) * 44, -1182, 36, function() self:MarkTarget(selected) end)
         local icon = button:CreateTexture(nil, "ARTWORK")
         icon:SetSize(22, 22)
         icon:SetPoint("CENTER")
@@ -256,29 +322,33 @@ function Names:CreateOptions()
         SetRaidTargetIconTexture(icon, index)
         Tooltip(button, self.markerLabels[index] .. ": visible only to you")
     end
-    Button(content, "Clear target", 376, -842, 112, function() self:MarkTarget(0) end)
-    local clearManual = Button(content, "Clear manual", 498, -842, 94, function()
+    Button(content, "Clear target", 376, -1182, 112, function() self:MarkTarget(0) end)
+    local clearManual = Button(content, "Clear manual", 498, -1182, 94, function()
         self:HandleCommand("clearall")
     end)
     Tooltip(clearManual, "Remove all manual overrides. Automatic category markers apply again.")
-    Label(content, "Manual markers override category markers and last until logout or /reload.", 12, -886, "GameFontDisableSmall")
-    Label(content, "Shared raid markers remain separate. NPC name visibility is never changed.", 12, -906, "GameFontDisableSmall")
+    Label(content, "Manual markers override category markers and last until logout or /reload.", 12, -1226, "GameFontDisableSmall")
+    Label(content, "Shared raid markers remain separate. NPC name visibility is never changed.", 12, -1246, "GameFontDisableSmall")
 
-    Section(content, "Access and display limits", -964)
-    Label(content, "/names opens this menu. /names mark skull marks your target locally.", 12, -1002)
-    Label(content, "Minimap: left-click for settings, right-click for markers, drag to reposition.", 12, -1024)
-    local note = Label(content, "Custom names use accessible nameplates and their normal range. Player names fall back to Blizzard in instances. Personal NPC markers require an accessible NPC nameplate; this addon does not enable NPC nameplates.", 12, -1060, "GameFontDisableSmall")
+    Section(content, "Access and display limits", -1304)
+    Label(content, "/names opens this menu. /names mark skull marks your target locally.", 12, -1342)
+    Label(content, "Minimap: left-click for settings, right-click for markers, drag to reposition.", 12, -1364)
+    local note = Label(content, "Custom names use accessible nameplates and their normal range. Player names fall back to Blizzard in instances. Personal NPC markers require an accessible NPC nameplate; this addon does not enable NPC nameplates.", 12, -1400, "GameFontDisableSmall")
     note:SetWidth(580)
     note:SetJustifyH("LEFT")
     note:SetWordWrap(true)
-    Button(content, "Restore addon defaults", 12, -1140, 190, function()
+    Button(content, "Restore addon defaults", 12, -1480, 190, function()
         if ColorPickerFrame then ColorPickerFrame:Hide() end
         self:ResetSettings()
     end)
-    Label(content, "To uninstall, switch the addon off here before removing its folder.", 12, -1182, "GameFontDisableSmall")
+    Label(content, "To uninstall, switch the addon off here before removing its folder.", 12, -1522, "GameFontDisableSmall")
 
     panel:SetScript("OnShow", function() self:RefreshOptions() end)
-    panel:SetScript("OnHide", function() if self.markerPicker then self.markerPicker:Hide() end end)
+    panel:SetScript("OnHide", function()
+        self:StopNameEffect(previewFrame)
+        if self.markerPicker then self.markerPicker:Hide() end
+        if self.effectPicker then self.effectPicker:Hide() end
+    end)
     local category = Settings.RegisterCanvasLayoutCategory(panel, "Familiar Names")
     Settings.RegisterAddOnCategory(category)
     self.settingsCategory = category

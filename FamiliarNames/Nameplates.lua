@@ -72,6 +72,8 @@ local function CreateOverlay(plate)
     overlay.marker:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
     overlay.sharedMarker = overlay:CreateTexture(nil, "OVERLAY")
     overlay.sharedMarker:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
+    overlay:SetScript("OnHide", function(self) Names:StopNameEffect(self, true) end)
+    overlay:SetScript("OnShow", function(self) Names:ResumeNameEffect(self) end)
     overlay:Hide()
     overlays[plate] = overlay
     return overlay
@@ -80,6 +82,7 @@ end
 function Names:RemovePlate(unit)
     local overlay = plates[unit]
     if overlay then
+        self:StopNameEffect(overlay)
         RestoreName(overlay)
         RestorePlate(overlay)
         overlay:Hide()
@@ -165,6 +168,8 @@ function Names:UpdatePlate(unit)
                 overlay.name:SetTextColor(self.Plain(r) or 1, self.Plain(g) or 1, self.Plain(b) or 1)
             end
             overlay.name:Show()
+            local effect = rule and (category ~= "enemies" or rule.highlight) and rule.effect or "none"
+            self:ApplyNameEffect(overlay, effect)
             local guild = isPlayer and self.db.showGuild and self.Plain(GetGuildInfo(unit))
             if guild then
                 overlay.guild:SetFont(font, math.max(10, self.db.fontSize - 3), flags)

@@ -4,7 +4,7 @@ A small, dependency-free World of Warcraft: Forever addon for personal player-na
 
 ## Install
 
-1. Extract `FamiliarNames.zip` into the **Forever client's** `Interface\AddOns` directory. Use your launcher's **Show in Explorer** option to find the correct client folder.
+1. Extract the downloaded ZIP into the **Forever client's** `Interface\AddOns` directory. Use your launcher's **Show in Explorer** option to find the correct client folder.
 2. Check the resulting path is `Interface\AddOns\FamiliarNames\FamiliarNames.toc`; avoid an extra nested folder.
 3. Enable **Familiar Names** in the game's AddOns list and log in, or `/reload` if already playing.
 4. Type `/names` or left-click the minimap button. The same panel appears under **Settings → AddOns → Familiar Names**.
@@ -21,6 +21,12 @@ Settings are saved per character. No other addon or library is needed.
 - Battle.net friends display their character names, not their BattleTags or account names.
 - Adjust size, outline, vertical position, player titles and guild text. NPC names remain under Blizzard's control.
 - “Party members” uses your actual party, including your party subgroup in a raid; it does not automatically include every raid member.
+
+## Animated highlights
+
+Each player category can select **None**, **Gold Shimmer**, **Void Pulse**, **Arcane Orbit**, **Frost Glint**, **Ember Glow** or **Emerald Wave**. Every category defaults to None. The Animated highlights section includes a live preview, a master switch, intensity (0–100) and speed (25–200%). Choosing None, zero intensity or switching animations off restores the chosen static colour. Effects tint the name; they never fade out the readable text. Enemy effects require enemy highlighting to be enabled. Managed pets inherit their category's effect; ordinary NPCs are untouched.
+
+`Effects.lua` uses one shared clock capped at 30 updates per second. Only active, visible addon labels are animated. Each label lazily allocates one glow and three spark textures, then reuses them. Animation updates read no unit data and allocate no UI objects. Removal, hidden labels, instance fallback and disabling the addon stop effects and restore static colours. The menu preview stops when settings close.
 
 ## Personal markers
 
@@ -73,6 +79,7 @@ Switch the addon off with `/names off` **outside combat before uninstalling** so
 ## Code and validation
 
 - `Core.lua`: defaults, category rules, local marker assignments, player-setting restoration and events.
+- `Effects.lua`: six local visual presets and their shared animation clock.
 - `Nameplates.lua`: pooled, mouse-transparent labels and icons; observes Blizzard name updates without replacing its functions.
 - `Options.lua`: Blizzard Settings panel, colour picker, icon picker and minimap button.
 
@@ -88,6 +95,8 @@ Tests cover filtering, category overlap, Battle.net matching, default and custom
 The pet regression matrix covers six unit types across strangers, your own units, party members, character friends, Battle.net friends and guildmates. Additional cases cover enemy pets, missing/secret owners, nested ownership, ownership cycles, guild changes, native refreshes and restoration.
 
 The nameplate regression cases also check health/cast bars and level badges, independent category controls, native alpha refreshes, shared raid markers, plate reuse and combat restrictions. Hidden plates' click areas are cleared only when `CanChangeHitTestPoints()` permits it. If combat protects the click area, visual hiding still applies and click-area updates wait for a permitted update or combat ending. Restoration uses the current Blizzard layout. Shared raid icons are mirrored outside a hidden plate so existing assignments remain visible.
+
+Animation cases cover all six presets, full-opacity names, texture reuse, absence of game-data queries during ticks, static-colour restoration, pause/resume, recycled NPC frames, enemy opt-in and the live picker/preview. The animated README preview is an illustration rendered from the same Lua effect positions and colours, not a game recording.
 
 The README images are drawn illustrations of the controls and visibility rules, not in-game screenshots.
 

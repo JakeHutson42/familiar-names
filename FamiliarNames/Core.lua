@@ -13,13 +13,14 @@ Names.defaults = {
     showMinimap = true, minimapAngle = 220,
     fontSize = 16, outline = true, nameOffset = 0, showGuild = false, showTitles = false,
     markersEnabled = true, markersWhenHidden = true, markerSize = 24, markerOffset = 16,
+    animatedNames = true, effectIntensity = 60, effectSpeed = 100,
     priority = { "party", "battleNet", "friends", "guild" },
     categories = {
-        party = { show = true, hidePlate = true, color = { 0.35, 0.70, 1 }, marker = 0 },
-        battleNet = { show = true, hidePlate = true, color = { 0.75, 0.50, 1 }, marker = 0 },
-        friends = { show = true, hidePlate = true, color = { 1, 0.85, 0.25 }, marker = 0 },
-        guild = { show = true, hidePlate = true, color = { 0.30, 1, 0.45 }, marker = 0 },
-        enemies = { show = true, hidePlate = false, highlight = false, color = { 1, 0.25, 0.25 }, marker = 0 },
+        party = { show = true, hidePlate = true, color = { 0.35, 0.70, 1 }, marker = 0, effect = "none" },
+        battleNet = { show = true, hidePlate = true, color = { 0.75, 0.50, 1 }, marker = 0, effect = "none" },
+        friends = { show = true, hidePlate = true, color = { 1, 0.85, 0.25 }, marker = 0, effect = "none" },
+        guild = { show = true, hidePlate = true, color = { 0.30, 1, 0.45 }, marker = 0, effect = "none" },
+        enemies = { show = true, hidePlate = false, highlight = false, color = { 1, 0.25, 0.25 }, marker = 0, effect = "none" },
     },
 }
 

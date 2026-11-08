@@ -21,6 +21,7 @@ function Widget:Show() self.shown = true; if self.scripts.OnShow then self.scrip
 function Widget:Hide() self.shown = false; if self.scripts.OnHide then self.scripts.OnHide(self) end end
 function Widget:SetShown(value) if value then self:Show() else self:Hide() end end
 function Widget:IsShown() return self.shown end
+function Widget:IsVisible() return self.shown and (not self.parent or self.parent:IsVisible()) end
 function Widget:SetAlpha(value) AssertPlain(value); self.alpha = value end
 function Widget:GetAlpha() return self.alpha end
 function Widget:GetEffectiveAlpha() return self.alpha * (self.parent and self.parent:GetEffectiveAlpha() or 1) end
@@ -40,6 +41,9 @@ function Widget:GetRaidTargetIndex() return units[self.unit].raidMarker end
 function Widget:SetText(text) AssertPlain(text); self.textValue = text end
 function Widget:SetTextColor(...) self.color = { ... } end
 function Widget:GetTextColor() return unpack(self.color) end
+function Widget:GetStringWidth() return #(self.textValue or "") * 8 end
+function Widget:SetBlendMode(value) self.blendMode = value end
+function Widget:SetVertexColor(...) self.vertexColor = { ... } end
 function Widget:SetFont(...) self.font = { ... } end
 function Widget:SetPoint(...) self.point = { ... } end
 function Widget:ClearAllPoints() self.point = nil end
@@ -178,7 +182,7 @@ function hooksecurefunc(target, name, callback)
 end
 
 local Names = {}
-for _, file in ipairs({ "Core.lua", "Nameplates.lua", "Options.lua" }) do
+for _, file in ipairs({ "Core.lua", "Effects.lua", "Nameplates.lua", "Options.lua" }) do
     assert(loadfile("FamiliarNames/" .. file))("FamiliarNames", Names)
 end
 local events = frames[1]
@@ -669,6 +673,150 @@ Test("enemy minions with unavailable owners still follow enemy plate settings", 
     Names.db.categories.enemies.show = false
     Names:SettingsChanged()
     assert(plate.UnitFrame.alpha == 0 and not Overlay(plate).name.shown)
+end)
+Test("effects default to none and all six presets animate without fading the name", function()
+    Names:ResetSettings()
+    assert(not FamiliarNamesEffectsTicker.shown)
+    assert(Names.db.categories.party.effect == "none" and #Names.effectPresets == 7)
+    local plate = AddUnit("nameplate120", { party = true })
+    for index = 2, #Names.effectPresets do
+        local preset = Names.effectPresets[index]
+        Names.db.categories.party.effect = preset.id
+        Names:SettingsChanged()
+        local overlay = Overlay(plate)
+        assert(overlay.nameEffect == preset.id and overlay.nameVisuals.glow.shown)
+        local spark = overlay.nameVisuals.sparks[1]
+        local before = { overlay.name.color[2], spark.point[4], spark.point[5], spark.width, spark.alpha }
+        FamiliarNamesEffectsTicker.scripts.OnUpdate(FamiliarNamesEffectsTicker, 0.27)
+        local changed = before[1] ~= overlay.name.color[2] or before[2] ~= spark.point[4]
+            or before[3] ~= spark.point[5] or before[4] ~= spark.width or before[5] ~= spark.alpha
+        assert(changed, preset.id .. " did not animate")
+        assert(overlay.name.alpha == 1 and overlay.name.shown, "Readable name was faded")
+        assert(plate.UnitFrame.alpha == 0, "Effect changed native plate visibility")
+        for _, particle in ipairs(overlay.nameVisuals.sparks) do
+            assert(particle.alpha >= 0 and particle.alpha <= 1)
+        end
+    end
+end)
+Test("effect visuals are pooled and animation ticks do not query unit data", function()
+    local overlay = Overlay(visiblePlates.nameplate120)
+    local visuals, childCount, frameCount = overlay.nameVisuals, #overlay.children, #frames
+    local guidAPI, plateAPI, cvarAPI = UnitGUID, C_NamePlate.GetNamePlates, C_CVar.GetCVar
+    local function Disallowed() error("Animation tick queried game data") end
+    UnitGUID, C_NamePlate.GetNamePlates, C_CVar.GetCVar = Disallowed, Disallowed, Disallowed
+    local success, problem = pcall(function()
+        for index = 1, 60 do FamiliarNamesEffectsTicker.scripts.OnUpdate(FamiliarNamesEffectsTicker, 1 / 60) end
+    end)
+    UnitGUID, C_NamePlate.GetNamePlates, C_CVar.GetCVar = guidAPI, plateAPI, cvarAPI
+    assert(success, problem)
+    assert(#frames == frameCount and #overlay.children == childCount)
+    Names:RefreshPlates()
+    assert(overlay.nameVisuals == visuals and #overlay.children == childCount)
+end)
+Test("none, master disable and zero intensity restore the chosen static colour", function()
+    local overlay = Overlay(visiblePlates.nameplate120)
+    Names.db.categories.party.color = { 0.17, 0.45, 0.81 }
+    Names.db.categories.party.effect = "gold"
+    Names:SettingsChanged()
+    assert(overlay.name.color[1] == 1)
+    Names.db.animatedNames = false
+    Names:SettingsChanged()
+    assert(overlay.name.color[1] == 0.17 and not overlay.nameVisuals.glow.shown)
+    assert(not FamiliarNamesEffectsTicker.shown)
+    Names.db.animatedNames = true
+    Names.db.effectIntensity = 0
+    Names:SettingsChanged()
+    assert(overlay.name.color[1] == 0.17 and not overlay.nameEffect)
+    Names.db.effectIntensity = 60
+    Names.db.categories.party.effect = "none"
+    Names:SettingsChanged()
+    assert(overlay.name.color[1] == 0.17 and not FamiliarNamesEffectsTicker.shown)
+end)
+Test("effects pause on hidden overlays and resume without allocating new textures", function()
+    Names.db.categories.party.effect = "void"
+    Names:SettingsChanged()
+    local overlay = Overlay(visiblePlates.nameplate120)
+    local visuals = overlay.nameVisuals
+    overlay:Hide()
+    assert(not visuals.glow.shown)
+    overlay:Show()
+    assert(FamiliarNamesEffectsTicker.shown and overlay.nameVisuals == visuals and visuals.glow.shown)
+end)
+Test("hidden names never animate and recycled NPC plates have no leftover effects", function()
+    Names.db.categories.party.show = false
+    Names:SettingsChanged()
+    local overlay = Overlay(visiblePlates.nameplate120)
+    assert(not overlay.name.shown and not overlay.nameEffect and not overlay.nameVisuals.glow.shown)
+    Names.db.categories.party.show = true
+    Names:SettingsChanged()
+    Event("NAME_PLATE_UNIT_REMOVED", "nameplate120")
+    units.nameplate120 = { guid = "Creature-effect-reuse", isPlayer = false, name = "Ordinary NPC" }
+    Names:UpdatePlate("nameplate120")
+    assert(not overlay.nameEffect and not overlay.nameVisuals.glow.shown and not overlay.shown)
+    Names.db.categories.party.effect = "none"
+    Names:SettingsChanged()
+    assert(not FamiliarNamesEffectsTicker.shown)
+end)
+Test("enemy effects require enemy highlighting and respect name visibility", function()
+    local plate = AddUnit("nameplate121", { enemy = true })
+    Names.db.categories.enemies.effect = "arcane"
+    Names:SettingsChanged()
+    assert(not Overlay(plate).nameEffect)
+    Names.db.categories.enemies.highlight = true
+    Names:SettingsChanged()
+    assert(Overlay(plate).nameEffect == "arcane")
+    Names.db.categories.enemies.show = false
+    Names:SettingsChanged()
+    assert(not Overlay(plate).nameEffect and not Overlay(plate).name.shown)
+end)
+Test("the effect picker saves a category and animates the live preview", function()
+    Names:ResetSettings()
+    Names.options:Show()
+    local selector
+    for _, frame in ipairs(frames) do
+        if frame.template == "UIPanelButtonTemplate" and frame.point
+            and frame.point[2] == 157 and frame.point[3] == -810 then selector = frame end
+    end
+    assert(selector)
+    selector.scripts.OnClick(selector)
+    assert(Names.effectPicker.shown)
+    Names.effectPicker.children[2].scripts.OnClick()
+    assert(Names.db.categories.party.effect == "gold" and not Names.effectPicker.shown)
+    assert(Names.effectPreview.nameEffect == "gold" and FamiliarNamesEffectsTicker.shown)
+    Names.db.categories.battleNet.color = { 0.12, 0.34, 0.56 }
+    Names.db.categories.battleNet.effect = "frost"
+    Names.previewCategory = "battleNet"
+    Names:SettingsChanged()
+    assert(Names.effectPreview.nameEffect == "frost")
+    Names.db.animatedNames = false
+    Names:SettingsChanged()
+    assert(Names.effectPreview.name.color[1] == 0.12, "Preview restored a previous category's colour")
+    Names.options:Hide()
+    assert(not Names.effectPreview.nameEffect and not FamiliarNamesEffectsTicker.shown)
+end)
+Test("speed and intensity controls change the actual animation", function()
+    Names:ResetSettings()
+    local plate = AddUnit("nameplate122", { party = true })
+    Names.db.categories.party.effect = "gold"
+    Names.db.effectIntensity = 30
+    Names.db.effectSpeed = 25
+    Names:SettingsChanged()
+    local overlay = Overlay(plate)
+    local lowGlow = overlay.nameVisuals.glow.alpha
+    Names.db.effectIntensity = 90
+    Names:SettingsChanged()
+    assert(math.abs(overlay.nameVisuals.glow.alpha / lowGlow - 3) < 0.001)
+    local spark, width = overlay.nameVisuals.sparks[1], overlay.name:GetStringWidth()
+    local before = spark.point[4]
+    FamiliarNamesEffectsTicker.scripts.OnUpdate(FamiliarNamesEffectsTicker, 0.1)
+    local slowDistance = (spark.point[4] - before) % width
+    Names.db.effectSpeed = 200
+    before = spark.point[4]
+    FamiliarNamesEffectsTicker.scripts.OnUpdate(FamiliarNamesEffectsTicker, 0.1)
+    local fastDistance = (spark.point[4] - before) % width
+    assert(math.abs(fastDistance / slowDistance - 8) < 0.001)
+    Names.db.categories.party.effect = "none"
+    Names:SettingsChanged()
 end)
 Test("reset and logout restore the original native settings", function()
     Names:ResetSettings()
