@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: Familiar Names
+## Notes: Personal player name colours, visibility and markers.
+## Author: Jake
+## Version: 1.0.1
+## SavedVariablesPerCharacter: FamiliarNamesDB
+## OptionalDeps: Blizzard_NamePlates, Blizzard_Settings, Blizzard_ColorPickerFrame
+
+Core.lua
+Nameplates.lua
+Options.lua
