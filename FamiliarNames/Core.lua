@@ -9,16 +9,17 @@ Names.manualMarkers = {} -- Unit GUIDs, kept for this login only.
 Names.guildMembers = {}
 
 Names.defaults = {
-    enabled = true, hideStrangers = false, showMinimap = true, minimapAngle = 220,
+    enabled = true, hideStrangers = false, hideStrangerPlates = true, hideMinionPlates = false,
+    showMinimap = true, minimapAngle = 220,
     fontSize = 16, outline = true, nameOffset = 0, showGuild = false, showTitles = false,
     markersEnabled = true, markersWhenHidden = true, markerSize = 24, markerOffset = 16,
     priority = { "party", "battleNet", "friends", "guild" },
     categories = {
-        party = { show = true, color = { 0.35, 0.70, 1 }, marker = 0 },
-        battleNet = { show = true, color = { 0.75, 0.50, 1 }, marker = 0 },
-        friends = { show = true, color = { 1, 0.85, 0.25 }, marker = 0 },
-        guild = { show = true, color = { 0.30, 1, 0.45 }, marker = 0 },
-        enemies = { show = true, highlight = false, color = { 1, 0.25, 0.25 }, marker = 0 },
+        party = { show = true, hidePlate = true, color = { 0.35, 0.70, 1 }, marker = 0 },
+        battleNet = { show = true, hidePlate = true, color = { 0.75, 0.50, 1 }, marker = 0 },
+        friends = { show = true, hidePlate = true, color = { 1, 0.85, 0.25 }, marker = 0 },
+        guild = { show = true, hidePlate = true, color = { 0.30, 1, 0.45 }, marker = 0 },
+        enemies = { show = true, hidePlate = false, highlight = false, color = { 1, 0.25, 0.25 }, marker = 0 },
     },
 }
 
@@ -83,15 +84,18 @@ function Names:GetMinionRule(unit)
     if not isMinion then return end
     local enemy = self.Plain(UnitCanAttack("player", owner or unit))
     local show, category
-    if ownerGUID and ownerGUID == self.Plain(UnitGUID("player")) then
+    local ownMinion = ownerGUID and ownerGUID == self.Plain(UnitGUID("player"))
+    if ownMinion then
         show = true
     elseif ownerGUID then
         show, category = self:GetNameRule(self:GetMembership(owner, ownerGUID), enemy)
     else
         show = enemy and self.db.categories.enemies.show or (not enemy and not self.db.hideStrangers)
+        category = enemy and "enemies" or nil
     end
+    local hidePlate = self:ShouldHidePlate(show, category, ownMinion) or self.db.hideMinionPlates
     local filtered = enemy and self.enemyMinionsFiltered or (not enemy and self.friendlyMinionsFiltered)
-    if show and not filtered then return end -- Preserve native pet visibility when no replacement is needed.
+    if show and not filtered and not hidePlate then return end
     if self.Plain(UnitIsBattlePetCompanion(unit)) then
         show = show and C_CVar.GetCVar("UnitNameNonCombatCreatureName") == "1"
     else
@@ -99,7 +103,13 @@ function Names:GetMinionRule(unit)
         local original = self.db.originalCVars and self.db.originalCVars[key]
         show = show and (original or C_CVar.GetCVar(key)) ~= "0"
     end
-    return show, category
+    return show, category, hidePlate
+end
+
+function Names:ShouldHidePlate(showName, category, ownMinion)
+    if not showName then return true end
+    if category then return self.db.categories[category].hidePlate end
+    return not ownMinion and self.db.hideStrangerPlates
 end
 
 -- A visible matching category wins; hiding one category must not hide another.
@@ -138,7 +148,6 @@ local playerCVars = {
     UnitNameFriendlyPlayerName = "0",
     UnitNameEnemyPlayerName = "0",
     nameplateShowFriendlyPlayers = "1",
-    nameplateShowOnlyNameForFriendlyPlayerUnits = "1",
 }
 
 function Names:ApplyPlayerCVars(restore)

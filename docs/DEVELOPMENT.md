@@ -15,6 +15,7 @@ Settings are saved per character. No other addon or library is needed.
 
 - Separate visibility and colour settings for party members, guildmates, character friends and Battle.net friends.
 - The highest visible matching category supplies the colour and automatic marker. Move categories with the priority arrows. For example, hiding party names still allows a party member's name through if they are also in an enabled friends category.
+- Each category has its own **Hide plates** checkbox. It removes the entire native plate (health/cast bars, auras and level badge) while keeping the addon's enabled name. Pets inherit their owner's category rule. **Hide stranger nameplates** controls unknown friendly plates independently of their names, and **Hide pet / minion nameplates** also covers your own and enemy minions. Hiding a category's names, or enabling **Hide strangers**, always hides its plate too.
 - **Hide strangers** hides unknown *friendly players*. Enemy players have an independent visibility setting, enabled by default, and optional custom highlighting, disabled by default.
 - Player-owned pets, guardians, summons, totems and companions follow their owner's visibility rule. Ownership is resolved by GUID, including chains of summons. Party tokens and the guild roster retain membership when an owner is off screen; friends and Battle.net friends are matched directly by GUID. Unidentified friendly minions are hidden when strangers are hidden.
 - Battle.net friends display their character names, not their BattleTags or account names.
@@ -51,12 +52,13 @@ Custom overhead names require an accessible nameplate within the client's normal
 
 **Player customisation is deliberately suspended in all instances**, including dungeons, raids, battlegrounds, arenas and scenarios. This keeps Blizzard player names available where friendly nameplates or player identities may be protected. Custom names and player markers resume in the open world. Manual NPC markers can still appear on accessible NPC nameplates in instances.
 
-The addon enables name-only friendly player plates and temporarily manages these player settings:
+The addon enables friendly player plates and temporarily manages these player settings:
 
 - `UnitNameFriendlyPlayerName`
 - `UnitNameEnemyPlayerName`
 - `nameplateShowFriendlyPlayers`
-- `nameplateShowOnlyNameForFriendlyPlayerUnits`
+
+It does not force Blizzard's global friendly names-only setting. Unchecked **Hide plates** boxes use Blizzard's current plate style; social categories default to hidden plates so enabled names remain uncluttered. Enemy plates remain visible by default.
 
 While filtering pets, it also temporarily suppresses native player-minion labels (`UnitNameFriendlyMinionName`, and available pet/guardian/totem variants; the equivalent enemy values when enemies are hidden) and enables friendly player-minion plates. All values are saved before writes and restored when filtering is turned off. Known friendly pets get replacement names on accessible plates. Their names honour the original minion-name setting. Their owners' automatic markers are not copied to pets.
 
@@ -85,6 +87,8 @@ Tests cover filtering, category overlap, Battle.net matching, default and custom
 
 The pet regression matrix covers six unit types across strangers, your own units, party members, character friends, Battle.net friends and guildmates. Additional cases cover enemy pets, missing/secret owners, nested ownership, ownership cycles, guild changes, native refreshes and restoration.
 
+The nameplate regression cases also check health/cast bars and level badges, independent category controls, native alpha refreshes, shared raid markers, plate reuse and combat restrictions. Hidden plates' click areas are cleared only when `CanChangeHitTestPoints()` permits it. If combat protects the click area, visual hiding still applies and click-area updates wait for a permitted update or combat ending. Restoration uses the current Blizzard layout. Shared raid icons are mirrored outside a hidden plate so existing assignments remain visible.
+
 The README images are drawn illustrations of the controls and visibility rules, not in-game screenshots.
 
 API references checked against Blizzard's published UI source, mirrored on the `forever` branch:
@@ -92,4 +96,5 @@ API references checked against Blizzard's published UI source, mirrored on the `
 - [Forever nameplate settings](https://github.com/Gethe/wow-ui-source/blob/forever/Interface/AddOns/Blizzard_SettingsDefinitions_Frame/Nameplates.lua)
 - [Nameplate lifecycle](https://github.com/Gethe/wow-ui-source/blob/forever/Interface/AddOns/Blizzard_NamePlates/Blizzard_NamePlateBase.lua)
 - [Native name rendering](https://github.com/Gethe/wow-ui-source/blob/forever/Interface/AddOns/Blizzard_UnitFrame/Shared/CompactUnitFrame.lua)
+- [Protected nameplate click areas](https://github.com/Gethe/wow-ui-source/blob/forever/Interface/AddOns/Blizzard_APIDocumentationGenerated/FrameAPINamePlateDocumentation.lua)
 - [Friend and Battle.net APIs](https://github.com/Gethe/wow-ui-source/blob/forever/Interface/AddOns/Blizzard_APIDocumentationGenerated/BattleNetDocumentation.lua)

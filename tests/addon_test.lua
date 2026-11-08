@@ -23,6 +23,20 @@ function Widget:SetShown(value) if value then self:Show() else self:Hide() end e
 function Widget:IsShown() return self.shown end
 function Widget:SetAlpha(value) AssertPlain(value); self.alpha = value end
 function Widget:GetAlpha() return self.alpha end
+function Widget:GetEffectiveAlpha() return self.alpha * (self.parent and self.parent:GetEffectiveAlpha() or 1) end
+function Widget:CanChangeHitTestPoints()
+    if self.hitTestAllowed ~= nil then return self.hitTestAllowed end
+    return not combat
+end
+function Widget:ClearAllHitTestPoints()
+    assert(self:CanChangeHitTestPoints(), "Protected click area was changed")
+    self.clickable = false
+end
+function Widget:UpdateHitTestArea()
+    assert(self.plate:CanChangeHitTestPoints(), "Protected click area was restored")
+    self.plate.clickable = true
+end
+function Widget:GetRaidTargetIndex() return units[self.unit].raidMarker end
 function Widget:SetText(text) AssertPlain(text); self.textValue = text end
 function Widget:SetTextColor(...) self.color = { ... } end
 function Widget:GetTextColor() return unpack(self.color) end
@@ -69,6 +83,7 @@ end
 UIParent = NewWidget()
 Minimap = NewWidget(UIParent)
 STANDARD_TEXT_FONT = "Fonts\\FRIZQT__.TTF"
+NamePlateSetupOptions = {}
 DEFAULT_CHAT_FRAME = { AddMessage = function(_, message) table.insert(messages, message) end }
 GameTooltip = { SetOwner = function() end, SetText = function() end, Hide = function() end }
 SlashCmdList = {}
@@ -155,9 +170,11 @@ function CompactUnitFrame_UpdateName(frame)
     frame.name:SetTextColor(0.8, 0.2, 0.1)
     frame.name:Show()
 end
-function hooksecurefunc(name, callback)
-    local original = _G[name]
-    _G[name] = function(...) original(...); callback(...) end
+function hooksecurefunc(target, name, callback)
+    if type(target) == "string" then callback, name, target = name, target, _G end
+    local original = target[name]
+    assert(type(original) == "function", "Hooked API is unavailable")
+    target[name] = function(...) original(...); callback(...) end
 end
 
 local Names = {}
@@ -179,9 +196,14 @@ local function AddUnit(token, properties, plate)
     units[token] = properties
     plate = plate or NewWidget(UIParent)
     plate.unitToken = token
+    plate.clickable = true
     plate.UnitFrame = NewWidget(plate)
     plate.UnitFrame.unit = token
+    plate.UnitFrame.plate = plate
     plate.UnitFrame.name = NewWidget(plate.UnitFrame)
+    plate.UnitFrame.healthBar = NewWidget(plate.UnitFrame)
+    plate.UnitFrame.castBar = NewWidget(plate.UnitFrame)
+    plate.UnitFrame.levelBadge = NewWidget(plate.UnitFrame)
     plate.UnitFrame.name.color = { 0.8, 0.2, 0.1 }
     visiblePlates[token] = plate
     return plate
@@ -351,7 +373,7 @@ Test("priority arrows and visibility controls stay bound to their displayed cate
     local up, show
     for _, child in ipairs(content.children) do
         if child.point and child.point[2] == 526 and child.point[3] == -145 then up = child end
-        if child.point and child.point[2] == 210 and child.point[3] == -106 then show = child end
+        if child.point and child.point[2] == 196 and child.point[3] == -106 then show = child end
     end
     local before = Names.db.priority[2]
     up.scripts.OnClick(up)
@@ -397,6 +419,7 @@ Test("pets, guardians, totems, summons and companions follow their owner's visib
             Names:UpdatePlate(token)
             assert(plate.UnitFrame.name.alpha == 0, "Native name was not managed: " .. kind)
             assert(Overlay(plate).name.shown == owner.show, "Wrong visibility for " .. kind .. "/" .. owner.guid)
+            assert(plate.UnitFrame.alpha == (owner.guid == "Player-self" and 1 or 0), "Owner's plate rule was not inherited")
             assert(not Overlay(plate).guild.shown, "Pet acquired its owner's guild subtitle")
         end
     end
@@ -479,6 +502,7 @@ Test("hidden owner categories and native companion visibility are respected", fu
 end)
 Test("turning filtering off restores all pet settings and native names", function()
     Names.db.hideStrangers = false
+    Names.db.hideStrangerPlates = false
     Names:SettingsChanged()
     assert(cvars.UnitNameFriendlyMinionName == "1" and cvars.UnitNameFriendlyPetName == "1")
     assert(cvars.UnitNameFriendlyGuardianName == "0" and cvars.UnitNameFriendlyTotemName == "1")
@@ -496,6 +520,155 @@ Test("hidden minion markers obey the same visibility option as player markers", 
     Names.db.markersWhenHidden = true
     Names:RefreshPlates()
     assert(Overlay(visiblePlates.nameplate83).marker.shown)
+end)
+Test("hidden strangers' minions lose the entire plate, including health, cast and level", function()
+    Names:ResetSettings()
+    Names.db.hideStrangers = true
+    Names:SettingsChanged()
+    local plate = AddUnit("nameplate100", { guid = "Pet-photo-regression", isPlayer = false,
+        minion = true, ownerGUID = "Player-stranger", name = "Stranger's Imp" })
+    Names:UpdatePlate("nameplate100")
+    assert(plate.alpha == 1, "The root must stay available for addon labels and markers")
+    assert(plate.UnitFrame.healthBar:GetEffectiveAlpha() == 0)
+    assert(plate.UnitFrame.castBar:GetEffectiveAlpha() == 0)
+    assert(plate.UnitFrame.levelBadge:GetEffectiveAlpha() == 0)
+    assert(not Overlay(plate).name.shown and not plate.clickable)
+    CompactUnitFrame_UpdateName(plate.UnitFrame)
+    plate.UnitFrame:SetAlpha(1)
+    plate.UnitFrame:UpdateHitTestArea(NamePlateSetupOptions)
+    assert(plate.UnitFrame.alpha == 0 and not plate.clickable)
+end)
+Test("every category can hide bars independently of its coloured name", function()
+    local categories = { "party", "battleNet", "friends", "guild", "enemies" }
+    local properties = { { party = true }, { battleNet = true }, { friend = true }, { guild = true }, { enemy = true } }
+    for index, key in ipairs(categories) do
+        local token = "nameplate" .. (100 + index)
+        local plate = AddUnit(token, properties[index])
+        Names.db.categories[key].hidePlate = true
+        Names:SettingsChanged()
+        assert(plate.UnitFrame.alpha == 0 and not plate.clickable, key .. " bar survived")
+        assert(Overlay(plate).name.shown and Overlay(plate).name:GetEffectiveAlpha() == 1)
+        if key ~= "enemies" then assert(Overlay(plate).name.color[1] == Names.db.categories[key].color[1]) end
+        Names.db.categories[key].hidePlate = false
+        Names:SettingsChanged()
+        assert(plate.UnitFrame.alpha == 1 and plate.clickable, key .. " bar was not restored")
+        assert(Overlay(plate).name.shown)
+    end
+    assert(cvars.nameplateShowOnlyNameForFriendlyPlayerUnits == "0", "Global names-only mode must not override category choices")
+end)
+Test("stranger plate checkbox preserves names; hide strangers always hides both", function()
+    local plate = AddUnit("nameplate106", {})
+    Names.db.hideStrangers = false
+    Names.db.hideStrangerPlates = true
+    Names:SettingsChanged()
+    assert(Overlay(plate).name.shown and plate.UnitFrame.alpha == 0)
+    Names.db.hideStrangerPlates = false
+    Names:SettingsChanged()
+    assert(Overlay(plate).name.shown and plate.UnitFrame.alpha == 1)
+    Names.db.hideStrangers = true
+    Names:SettingsChanged()
+    assert(not Overlay(plate).name.shown and plate.UnitFrame.alpha == 0)
+end)
+Test("minion plate checkbox covers own and enemy pets while ordinary NPCs stay native", function()
+    local own = AddUnit("nameplate107", { guid = "Pet-self-plate", isPlayer = false, minion = true, ownerGUID = "Player-self" })
+    local enemy = AddUnit("nameplate108", { guid = "Pet-enemy-plate", isPlayer = false, minion = true, enemy = true, ownerGUID = "Player-enemy-offscreen" })
+    local npc = AddUnit("nameplate109", { guid = "Creature-unowned-plate", isPlayer = false })
+    Names.db.hideMinionPlates = true
+    Names:SettingsChanged()
+    assert(own.UnitFrame.alpha == 0 and Overlay(own).name.shown)
+    assert(enemy.UnitFrame.alpha == 0 and Overlay(enemy).name.shown)
+    assert(npc.UnitFrame.alpha == 1 and npc.clickable and not Overlay(npc))
+    Names.db.hideMinionPlates = false
+    Names:SettingsChanged()
+    assert(own.UnitFrame.alpha == 1 and own.clickable)
+    assert(enemy.UnitFrame.alpha == 1 and enemy.clickable)
+end)
+Test("shared markers survive hidden plates without changing shared assignments", function()
+    local plate = AddUnit("nameplate110", { party = true, raidMarker = 4 })
+    Names.db.categories.party.hidePlate = true
+    Names:SettingsChanged()
+    assert(plate.UnitFrame.alpha == 0)
+    assert(Overlay(plate).sharedMarker.shown and Overlay(plate).sharedMarker.icon == 4)
+    assert(Overlay(plate).sharedMarker:GetEffectiveAlpha() == 1)
+    units.nameplate110.raidMarker = nil
+    Event("RAID_TARGET_UPDATE")
+    assert(not Overlay(plate).sharedMarker.shown)
+end)
+Test("native alpha changes are respected on restoration", function()
+    local plate = visiblePlates.nameplate110
+    plate.UnitFrame:SetAlpha(0.6)
+    assert(plate.UnitFrame.alpha == 0)
+    Names.db.categories.party.hidePlate = false
+    Names:SettingsChanged()
+    assert(plate.UnitFrame.alpha == 0.6)
+    Names.db.categories.party.hidePlate = true
+    Names:SettingsChanged()
+    plate.UnitFrame:SetAlpha(0)
+    Names.db.categories.party.hidePlate = false
+    Names:SettingsChanged()
+    assert(plate.UnitFrame.alpha == 0)
+end)
+Test("combat-protected click areas are restored when Blizzard permits it", function()
+    local plate = AddUnit("nameplate111", { party = true })
+    Names.db.categories.party.hidePlate = true
+    combat = true
+    Names:UpdatePlate("nameplate111")
+    assert(plate.UnitFrame.alpha == 0 and plate.clickable)
+    combat = false
+    Event("PLAYER_REGEN_ENABLED")
+    assert(not plate.clickable)
+    combat = true
+    Names.db.categories.party.hidePlate = false
+    Names:SettingsChanged()
+    assert(plate.UnitFrame.alpha == 1 and not plate.clickable)
+    combat = false
+    Event("PLAYER_REGEN_ENABLED")
+    assert(plate.UnitFrame.alpha == 1 and plate.clickable)
+end)
+Test("hidden plate removal and NPC reuse restore all native visuals and click areas", function()
+    local plate = visiblePlates.nameplate111
+    Names.db.categories.party.hidePlate = true
+    Names:SettingsChanged()
+    assert(plate.UnitFrame.alpha == 0)
+    Event("NAME_PLATE_UNIT_REMOVED", "nameplate111")
+    assert(plate.UnitFrame.alpha == 1 and plate.clickable)
+    units.nameplate111 = { guid = "Creature-reused-plate", name = "Ordinary NPC", isPlayer = false }
+    Names:UpdatePlate("nameplate111")
+    assert(plate.UnitFrame.alpha == 1 and plate.UnitFrame.levelBadge:GetEffectiveAlpha() == 1)
+    assert(not Overlay(plate).shown and plate.clickable)
+    Names:HandleCommand("off")
+    assert(visiblePlates.nameplate100.UnitFrame.alpha == 1 and visiblePlates.nameplate100.clickable)
+    Names:HandleCommand("on")
+end)
+Test("nameplate checkbox controls follow the displayed category after reordering", function()
+    local control
+    for _, frame in ipairs(frames) do
+        if frame.template == "UICheckButtonTemplate" and frame.point
+            and frame.point[2] == 258 and frame.point[3] == -106 then control = frame end
+    end
+    assert(control)
+    local category = Names.db.priority[1]
+    control.checked = false
+    control.scripts.OnClick(control)
+    assert(not Names.db.categories[category].hidePlate)
+    control.checked = true
+    control.scripts.OnClick(control)
+    assert(Names.db.categories[category].hidePlate)
+end)
+Test("enemy minions with unavailable owners still follow enemy plate settings", function()
+    Names:ResetSettings()
+    Names.db.hideStrangers = true
+    Names:SettingsChanged()
+    local plate = AddUnit("nameplate112", { guid = "Pet-enemy-secret-owner", isPlayer = false,
+        minion = true, enemy = true, ownerGUID = SECRET })
+    Names:UpdatePlate("nameplate112")
+    assert(plate.UnitFrame.alpha == 1 and not Overlay(plate))
+    Names.db.categories.enemies.hidePlate = true
+    Names:SettingsChanged()
+    assert(plate.UnitFrame.alpha == 0 and Overlay(plate).name.shown)
+    Names.db.categories.enemies.show = false
+    Names:SettingsChanged()
+    assert(plate.UnitFrame.alpha == 0 and not Overlay(plate).name.shown)
 end)
 Test("reset and logout restore the original native settings", function()
     Names:ResetSettings()
